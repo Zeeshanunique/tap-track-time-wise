@@ -26,8 +26,8 @@ interface TimerContextType {
   isRunning: boolean;
   currentSession: TimerSession | null;
   allSessions: TimerSession[];
-  startTimer: () => void;
-  stopTimer: () => void;
+  startTimer: () => Promise<void>;
+  stopTimer: () => Promise<void>;
   getDailyTotal: (date: string) => number;
 }
 
@@ -91,10 +91,28 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setInitialized(true);
       } catch (error) {
         console.error('Failed to fetch sessions:', error);
+        setInitialized(true);
       }
     };
 
     fetchSessions();
+
+    // Set up subscription for real-time updates
+    const subscription = supabase
+      .channel('timer_sessions_changes')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'timer_sessions' 
+      }, (payload) => {
+        console.log('Real-time update received:', payload);
+        fetchSessions(); // Refresh data when changes occur
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, []);
 
   // Save sessions to localStorage as a backup
@@ -105,21 +123,21 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [allSessions, initialized]);
 
   const startTimer = async () => {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    const currentTime = now.toISOString();
-    
-    const newSession: TimerSession = {
-      id: crypto.randomUUID(),
-      date: today,
-      startTime: currentTime,
-      endTime: null,
-      duration: null
-    };
-    
     try {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const currentTime = now.toISOString();
+      
+      const newSession: TimerSession = {
+        id: crypto.randomUUID(),
+        date: today,
+        startTime: currentTime,
+        endTime: null,
+        duration: null
+      };
+      
       // Save to Supabase with type assertion
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('timer_sessions')
         .insert({
           id: newSession.id,
@@ -128,25 +146,25 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           end_time: null,
           duration: null
         }) as unknown as {
-          data: CustomDatabase['timer_sessions'] | null;
           error: Error | null;
         };
 
       if (error) {
         console.error('Error starting timer in Supabase:', error);
       }
+      
+      setCurrentSession(newSession);
+      setAllSessions(prev => [...prev, newSession]);
+      setIsRunning(true);
     } catch (error) {
-      console.error('Failed to start timer in Supabase:', error);
+      console.error('Failed to start timer:', error);
     }
-    
-    setCurrentSession(newSession);
-    setAllSessions(prev => [...prev, newSession]);
-    setIsRunning(true);
-    setInitialized(true);
   };
 
   const stopTimer = async () => {
-    if (currentSession) {
+    if (!currentSession) return;
+
+    try {
       const now = new Date();
       const currentTime = now.toISOString();
       const startTime = new Date(currentSession.startTime);
@@ -158,23 +176,19 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         duration: durationInSeconds
       };
       
-      try {
-        // Update in Supabase with type assertion
-        const { error } = await supabase
-          .from('timer_sessions')
-          .update({
-            end_time: updatedSession.endTime,
-            duration: updatedSession.duration
-          })
-          .eq('id', updatedSession.id) as unknown as {
-            error: Error | null;
-          };
+      // Update in Supabase with type assertion
+      const { error } = await supabase
+        .from('timer_sessions')
+        .update({
+          end_time: updatedSession.endTime,
+          duration: updatedSession.duration
+        })
+        .eq('id', updatedSession.id) as unknown as {
+          error: Error | null;
+        };
 
-        if (error) {
-          console.error('Error stopping timer in Supabase:', error);
-        }
-      } catch (error) {
-        console.error('Failed to stop timer in Supabase:', error);
+      if (error) {
+        console.error('Error stopping timer in Supabase:', error);
       }
       
       setAllSessions(prev => 
@@ -185,6 +199,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       
       setCurrentSession(null);
       setIsRunning(false);
+    } catch (error) {
+      console.error('Failed to stop timer:', error);
     }
   };
 

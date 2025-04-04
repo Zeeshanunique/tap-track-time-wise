@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Square } from 'lucide-react';
 import { useTimer } from '@/context/TimerContext';
 import { formatTime } from '@/utils/timeUtils';
@@ -11,40 +11,44 @@ const Timer = () => {
   const [elapsedTime, setElapsedTime] = useState(0);
   const { toast } = useToast();
 
-  useEffect(() => {
-    let intervalId: number | undefined;
-
+  // Update elapsed time function
+  const updateElapsedTime = useCallback(() => {
     if (isRunning && currentSession) {
-      // Update elapsed time initially
       const startTime = new Date(currentSession.startTime);
       setElapsedTime(Math.floor((Date.now() - startTime.getTime()) / 1000));
-
-      // Set up interval to update elapsed time every second
-      intervalId = window.setInterval(() => {
-        const startTime = new Date(currentSession.startTime);
-        setElapsedTime(Math.floor((Date.now() - startTime.getTime()) / 1000));
-      }, 1000);
-    } else {
-      setElapsedTime(0);
     }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
   }, [isRunning, currentSession]);
 
-  const toggleTimer = () => {
+  // Set up interval to update elapsed time
+  useEffect(() => {
+    if (!isRunning) {
+      setElapsedTime(0);
+      return;
+    }
+    
+    // Update initially
+    updateElapsedTime();
+    
+    // Then set interval
+    const intervalId = window.setInterval(updateElapsedTime, 1000);
+    
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [isRunning, updateElapsedTime]);
+
+  const toggleTimer = async () => {
     if (isRunning) {
-      stopTimer();
+      const duration = elapsedTime;
+      await stopTimer();
+      
       // Show toast when time is added to today's progress
       toast({
         title: 'Session completed',
-        description: `${formatTime(elapsedTime)} added to today's progress`,
+        description: `${formatTime(duration)} added to today's progress`,
       });
     } else {
-      startTimer();
+      await startTimer();
     }
   };
 
