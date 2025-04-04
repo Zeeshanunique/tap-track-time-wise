@@ -1,5 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface TimerSession {
   id: string;
@@ -20,35 +21,74 @@ interface TimerContextType {
 
 const TimerContext = createContext<TimerContextType | undefined>(undefined);
 
+// Backup to localStorage in case of no internet connection
 const LOCAL_STORAGE_KEY = 'tap-track-sessions';
 
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [currentSession, setCurrentSession] = useState<TimerSession | null>(null);
   const [allSessions, setAllSessions] = useState<TimerSession[]>([]);
+  const [initialized, setInitialized] = useState(false);
 
-  // Load sessions from localStorage on initial render
+  // Load sessions from Supabase on initial render
   useEffect(() => {
-    const savedSessions = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (savedSessions) {
-      const parsedSessions = JSON.parse(savedSessions);
-      setAllSessions(parsedSessions);
-      
-      // Check if there's an active session
-      const activeSession = parsedSessions.find((session: TimerSession) => session.endTime === null);
-      if (activeSession) {
-        setCurrentSession(activeSession);
-        setIsRunning(true);
+    const fetchSessions = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('timer_sessions')
+          .select('*');
+        
+        if (error) {
+          console.error('Error fetching sessions:', error);
+          // Fallback to localStorage if Supabase fails
+          const savedSessions = localStorage.getItem(LOCAL_STORAGE_KEY);
+          if (savedSessions) {
+            const parsedSessions = JSON.parse(savedSessions);
+            setAllSessions(parsedSessions);
+            
+            // Check if there's an active session
+            const activeSession = parsedSessions.find((session: TimerSession) => session.endTime === null);
+            if (activeSession) {
+              setCurrentSession(activeSession);
+              setIsRunning(true);
+            }
+          }
+        } else if (data) {
+          // Transform from Supabase format to our app format
+          const formattedSessions = data.map((session) => ({
+            id: session.id,
+            date: session.date,
+            startTime: session.start_time,
+            endTime: session.end_time,
+            duration: session.duration,
+          }));
+          
+          setAllSessions(formattedSessions);
+          
+          // Check if there's an active session
+          const activeSession = formattedSessions.find((session) => session.endTime === null);
+          if (activeSession) {
+            setCurrentSession(activeSession);
+            setIsRunning(true);
+          }
+        }
+        setInitialized(initialized);
+      } catch (error) {
+        console.error('Failed to fetch sessions:', error);
       }
-    }
+    };
+
+    fetchSessions();
   }, []);
 
-  // Save sessions to localStorage whenever they change
+  // Save sessions to localStorage as a backup
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(allSessions));
-  }, [allSessions]);
+    if (initialized) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(allSessions));
+    }
+  }, [allSessions, initialized]);
 
-  const startTimer = () => {
+  const startTimer = async () => {
     const now = new Date();
     const today = now.toISOString().split('T')[0];
     const currentTime = now.toISOString();
@@ -61,12 +101,34 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       duration: null
     };
     
+    try {
+      // Save to Supabase
+      const { data, error } = await supabase
+        .from('timer_sessions')
+        .insert({
+          id: newSession.id,
+          date: newSession.date,
+          start_time: newSession.startTime,
+          end_time: null,
+          duration: null
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error starting timer in Supabase:', error);
+      }
+    } catch (error) {
+      console.error('Failed to start timer in Supabase:', error);
+    }
+    
     setCurrentSession(newSession);
     setAllSessions(prev => [...prev, newSession]);
     setIsRunning(true);
+    setInitialized(true);
   };
 
-  const stopTimer = () => {
+  const stopTimer = async () => {
     if (currentSession) {
       const now = new Date();
       const currentTime = now.toISOString();
@@ -78,6 +140,23 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         endTime: currentTime,
         duration: durationInSeconds
       };
+      
+      try {
+        // Update in Supabase
+        const { error } = await supabase
+          .from('timer_sessions')
+          .update({
+            end_time: updatedSession.endTime,
+            duration: updatedSession.duration
+          })
+          .eq('id', updatedSession.id);
+
+        if (error) {
+          console.error('Error stopping timer in Supabase:', error);
+        }
+      } catch (error) {
+        console.error('Failed to stop timer in Supabase:', error);
+      }
       
       setAllSessions(prev => 
         prev.map(session => 

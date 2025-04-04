@@ -173,6 +173,33 @@ export type Database = {
         }
         Relationships: []
       }
+      timer_sessions: {
+        Row: {
+          created_at: string | null
+          date: string
+          duration: number | null
+          end_time: string | null
+          id: string
+          start_time: string
+        }
+        Insert: {
+          created_at?: string | null
+          date: string
+          duration?: number | null
+          end_time?: string | null
+          id?: string
+          start_time: string
+        }
+        Update: {
+          created_at?: string | null
+          date?: string
+          duration?: number | null
+          end_time?: string | null
+          id?: string
+          start_time?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
