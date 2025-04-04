@@ -4,12 +4,14 @@ import { useTimer } from '@/context/TimerContext';
 import { formatTime } from '@/utils/timeUtils';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 
 interface TimerProps {
   onSessionEnd?: () => void;
 }
 
 const Timer = ({ onSessionEnd }: TimerProps) => {
+  const { user } = useAuth();
   const { isRunning, startTimer, stopTimer, currentSession, syncPendingOperations } = useTimer();
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -44,11 +46,12 @@ const Timer = ({ onSessionEnd }: TimerProps) => {
     };
   }, [toast, syncPendingOperations]);
 
-  // Update elapsed time function
+  // Update elapsed time function and check if day changed
   const updateElapsedTime = useCallback(() => {
     if (isRunning && currentSession) {
       const startTime = new Date(currentSession.startTime);
-      setElapsedTime(Math.floor((Date.now() - startTime.getTime()) / 1000));
+      const now = new Date();
+      setElapsedTime(Math.floor((now.getTime() - startTime.getTime()) / 1000));
     }
   }, [isRunning, currentSession]);
 
@@ -71,6 +74,15 @@ const Timer = ({ onSessionEnd }: TimerProps) => {
   }, [isRunning, updateElapsedTime]);
 
   const toggleTimer = async () => {
+    if (!user) {
+      toast({
+        title: 'Authentication required',
+        description: 'Please sign in to track your time',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     if (isRunning) {
       const duration = elapsedTime;
       await stopTimer();

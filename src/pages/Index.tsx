@@ -1,23 +1,64 @@
-
 import React, { useEffect, useState } from 'react';
 import Timer from '@/components/Timer';
 import { Button } from '@/components/ui/button';
 import { BarChart3, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTimer } from '@/context/TimerContext';
-import { formatDuration } from '@/utils/timeUtils';
+import { formatDuration, getTodayDateString } from '@/utils/timeUtils';
 
 const Index = () => {
-  const { getDailyTotal } = useTimer();
+  const { getTotalWithRunningSession, isRunning, currentSession } = useTimer();
   const [todayTotal, setTodayTotal] = useState<number>(0);
+  const [currentDate, setCurrentDate] = useState<string>('');
   
-  useEffect(() => {
-    // Get today's date in YYYY-MM-DD format
-    const today = new Date().toISOString().split('T')[0];
-    // Get total time for today
-    const total = getDailyTotal(today);
+  // Function to update today's total
+  const updateTodayTotal = () => {
+    const today = getTodayDateString();
+    
+    // If the date has changed, update the current date
+    if (today !== currentDate) {
+      setCurrentDate(today);
+    }
+    
+    // Get total time for today including any active session
+    const total = getTotalWithRunningSession(today);
     setTodayTotal(total);
-  }, [getDailyTotal]);
+  };
+  
+  // Update progress in real-time when a timer is running
+  useEffect(() => {
+    // Initial update
+    updateTodayTotal();
+    
+    // Set up interval to update the running session time
+    const progressInterval = isRunning ? 
+      setInterval(updateTodayTotal, 1000) : null;
+    
+    return () => {
+      if (progressInterval) clearInterval(progressInterval);
+    };
+  }, [isRunning, currentSession]);
+  
+  // Initial load and set up date checking
+  useEffect(() => {
+    // Set initial date
+    const today = getTodayDateString();
+    setCurrentDate(today);
+    updateTodayTotal();
+    
+    // Set up interval to check for date changes (every minute)
+    const dateCheckInterval = setInterval(() => {
+      const now = new Date();
+      const today = getTodayDateString();
+      
+      // If the date has changed, update today's total
+      if (today !== currentDate) {
+        updateTodayTotal();
+      }
+    }, 60000);
+    
+    return () => clearInterval(dateCheckInterval);
+  }, [currentDate]);
 
   return (
     <div className="min-h-screen max-w-lg mx-auto px-4 py-8 flex flex-col">
@@ -44,11 +85,7 @@ const Index = () => {
         </div>
         
         <div className="flex-grow flex items-center justify-center">
-          <Timer onSessionEnd={() => {
-            // Update today's total time whenever a session ends
-            const today = new Date().toISOString().split('T')[0];
-            setTodayTotal(getDailyTotal(today));
-          }} />
+          <Timer onSessionEnd={updateTodayTotal} />
         </div>
       </div>
     </div>

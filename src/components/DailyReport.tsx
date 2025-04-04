@@ -9,11 +9,35 @@ import { Button } from './ui/button';
 const DailyReport = () => {
   const { getDailyTotal, allSessions, syncPendingOperations } = useTimer();
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const last7Days = getLastNDays(7);
+  const [currentDate, setCurrentDate] = useState('');
+  const [reportDays, setReportDays] = useState<string[]>([]);
+  
+  // Initialize days list and set up current date
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    setCurrentDate(today);
+    setReportDays(getLastNDays(7));
+  }, []);
+  
+  // Check for date changes periodically
+  useEffect(() => {
+    const dateCheckInterval = setInterval(() => {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      
+      // If the date has changed, update the days list
+      if (today !== currentDate) {
+        setCurrentDate(today);
+        setReportDays(getLastNDays(7));
+      }
+    }, 60000); // Check every minute
+    
+    return () => clearInterval(dateCheckInterval);
+  }, [currentDate]);
   
   // Find the max duration for scaling the progress bars
   const maxDuration = Math.max(
-    ...last7Days.map(date => getDailyTotal(date)),
+    ...reportDays.map(date => getDailyTotal(date)),
     3600 // Minimum of 1 hour for scaling
   );
 
@@ -65,7 +89,7 @@ const DailyReport = () => {
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        {last7Days.map((date, index) => {
+        {reportDays.map((date, index) => {
           const totalSeconds = getDailyTotal(date);
           const percentage = Math.min(100, Math.floor((totalSeconds / maxDuration) * 100));
           const progressColor = getProgressColor(totalSeconds);
