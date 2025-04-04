@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTimer } from '@/context/TimerContext';
 import { ArrowLeft, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,13 @@ import { Link } from 'react-router-dom';
 const Dashboard = () => {
   const { allSessions, getDailyTotal } = useTimer();
   const last30Days = getLastNDays(30);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Force refresh when navigating to this page
+  useEffect(() => {
+    // Create a unique refresh key when the component mounts
+    setRefreshKey(Date.now());
+  }, []);
 
   // Group sessions by date - memoized to improve performance
   const sessionsByDate = useMemo(() => {
@@ -21,7 +28,7 @@ const Dashboard = () => {
       acc[session.date].push(session);
       return acc;
     }, {});
-  }, [allSessions]);
+  }, [allSessions, refreshKey]);
 
   // Calculate total duration for each day - memoized to improve performance
   const dailyTotals = useMemo(() => {
@@ -37,7 +44,7 @@ const Dashboard = () => {
         sessionCount
       };
     });
-  }, [last30Days, sessionsByDate]);
+  }, [last30Days, sessionsByDate, refreshKey]);
 
   // Calculate grand total of time tracked
   const grandTotal = useMemo(() => {

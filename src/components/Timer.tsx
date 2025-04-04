@@ -6,7 +6,11 @@ import { formatTime } from '@/utils/timeUtils';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 
-const Timer = () => {
+interface TimerProps {
+  onSessionEnd?: () => void;
+}
+
+const Timer = ({ onSessionEnd }: TimerProps) => {
   const { isRunning, startTimer, stopTimer, currentSession } = useTimer();
   const [elapsedTime, setElapsedTime] = useState(0);
   const { toast } = useToast();
@@ -41,6 +45,11 @@ const Timer = () => {
     if (isRunning) {
       const duration = elapsedTime;
       await stopTimer();
+      
+      // Call the onSessionEnd callback if provided
+      if (onSessionEnd) {
+        onSessionEnd();
+      }
       
       // Show toast when time is added to today's progress
       toast({
