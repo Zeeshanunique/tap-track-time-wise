@@ -10,6 +10,18 @@ interface TimerSession {
   duration: number | null; // in seconds
 }
 
+// This interface extends the existing Database types with our new timer_sessions table
+interface CustomDatabase {
+  timer_sessions: {
+    id: string;
+    date: string;
+    start_time: string;
+    end_time: string | null;
+    duration: number | null;
+    created_at: string | null;
+  }
+}
+
 interface TimerContextType {
   isRunning: boolean;
   currentSession: TimerSession | null;
@@ -34,9 +46,13 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const fetchSessions = async () => {
       try {
+        // Use type assertion to inform TypeScript about the timer_sessions table
         const { data, error } = await supabase
           .from('timer_sessions')
-          .select('*');
+          .select('*') as unknown as { 
+            data: CustomDatabase['timer_sessions'][] | null; 
+            error: Error | null 
+          };
         
         if (error) {
           console.error('Error fetching sessions:', error);
@@ -72,7 +88,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setIsRunning(true);
           }
         }
-        setInitialized(initialized);
+        setInitialized(true);
       } catch (error) {
         console.error('Failed to fetch sessions:', error);
       }
@@ -102,7 +118,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     
     try {
-      // Save to Supabase
+      // Save to Supabase with type assertion
       const { data, error } = await supabase
         .from('timer_sessions')
         .insert({
@@ -111,9 +127,10 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           start_time: newSession.startTime,
           end_time: null,
           duration: null
-        })
-        .select()
-        .single();
+        }) as unknown as {
+          data: CustomDatabase['timer_sessions'] | null;
+          error: Error | null;
+        };
 
       if (error) {
         console.error('Error starting timer in Supabase:', error);
@@ -142,14 +159,16 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
       
       try {
-        // Update in Supabase
+        // Update in Supabase with type assertion
         const { error } = await supabase
           .from('timer_sessions')
           .update({
             end_time: updatedSession.endTime,
             duration: updatedSession.duration
           })
-          .eq('id', updatedSession.id);
+          .eq('id', updatedSession.id) as unknown as {
+            error: Error | null;
+          };
 
         if (error) {
           console.error('Error stopping timer in Supabase:', error);
