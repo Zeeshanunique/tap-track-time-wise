@@ -4,10 +4,12 @@ import { Play, Square } from 'lucide-react';
 import { useTimer } from '@/context/TimerContext';
 import { formatTime } from '@/utils/timeUtils';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 
 const Timer = () => {
   const { isRunning, startTimer, stopTimer, currentSession } = useTimer();
   const [elapsedTime, setElapsedTime] = useState(0);
+  const { toast } = useToast();
 
   useEffect(() => {
     let intervalId: number | undefined;
@@ -36,8 +38,30 @@ const Timer = () => {
   const toggleTimer = () => {
     if (isRunning) {
       stopTimer();
+      // Show toast when time is added to today's progress
+      toast({
+        title: 'Session completed',
+        description: `${formatTime(elapsedTime)} added to today's progress`,
+      });
     } else {
       startTimer();
+    }
+  };
+
+  // Determine button color based on state and elapsed time
+  const getButtonClasses = () => {
+    if (isRunning) {
+      // Different shades of red based on elapsed time
+      if (elapsedTime > 3600) { // More than 1 hour
+        return 'bg-red-700 hover:bg-red-800';
+      } else if (elapsedTime > 1800) { // More than 30 minutes
+        return 'bg-red-600 hover:bg-red-700';
+      } else {
+        return 'bg-red-500 hover:bg-red-600';
+      }
+    } else {
+      // Different shades of green for start button
+      return 'bg-emerald-500 hover:bg-emerald-600';
     }
   };
 
@@ -50,8 +74,8 @@ const Timer = () => {
       <Button
         onClick={toggleTimer}
         className={`rounded-full w-40 h-40 flex items-center justify-center shadow-lg ${
-          isRunning ? 'bg-destructive hover:bg-destructive/90' : 'bg-primary hover:bg-primary/90 pulse-animation'
-        }`}
+          getButtonClasses()
+        } transition-colors duration-300`}
         size="lg"
       >
         {isRunning ? (
