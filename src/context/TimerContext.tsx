@@ -1,6 +1,6 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 
 interface TimerSession {
   id: string;
@@ -10,17 +10,8 @@ interface TimerSession {
   duration: number | null; // in seconds
 }
 
-// This interface extends the existing Database types with our new timer_sessions table
-interface CustomDatabase {
-  timer_sessions: {
-    id: string;
-    date: string;
-    start_time: string;
-    end_time: string | null;
-    duration: number | null;
-    created_at: string | null;
-  }
-}
+// We no longer need this interface since we're using the proper types from supabase
+type TimerSessionRow = Database['public']['Tables']['timer_sessions']['Row'];
 
 interface TimerContextType {
   isRunning: boolean;
@@ -29,30 +20,100 @@ interface TimerContextType {
   startTimer: () => Promise<void>;
   stopTimer: () => Promise<void>;
   getDailyTotal: (date: string) => number;
+  syncPendingOperations: () => Promise<void>;
 }
 
 const TimerContext = createContext<TimerContextType | undefined>(undefined);
 
 // Backup to localStorage in case of no internet connection
 const LOCAL_STORAGE_KEY = 'tap-track-sessions';
+const PENDING_START_KEY = 'pending_session_start';
+const PENDING_STOP_KEY = 'pending_session_stop';
 
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [currentSession, setCurrentSession] = useState<TimerSession | null>(null);
   const [allSessions, setAllSessions] = useState<TimerSession[]>([]);
   const [initialized, setInitialized] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  // Online/offline status detection
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncPendingOperations();
+    };
+    
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Sync any pending operations when the app comes online
+  const syncPendingOperations = async () => {
+    if (!isOnline) return;
+
+    try {
+      // Check for pending session starts
+      const pendingStartStr = localStorage.getItem(PENDING_START_KEY);
+      if (pendingStartStr) {
+        const pendingStart = JSON.parse(pendingStartStr) as TimerSession;
+        
+        const { error } = await supabase
+          .from('timer_sessions')
+          .insert({
+            id: pendingStart.id,
+            date: pendingStart.date,
+            start_time: pendingStart.startTime,
+            end_time: null,
+            duration: null
+          });
+          
+        if (!error) {
+          localStorage.removeItem(PENDING_START_KEY);
+          console.log('Successfully synced pending session start');
+        }
+      }
+      
+      // Check for pending session stops
+      const pendingStopStr = localStorage.getItem(PENDING_STOP_KEY);
+      if (pendingStopStr) {
+        const pendingStop = JSON.parse(pendingStopStr) as TimerSession;
+        
+        const { error } = await supabase
+          .from('timer_sessions')
+          .update({
+            end_time: pendingStop.endTime,
+            duration: pendingStop.duration
+          })
+          .eq('id', pendingStop.id);
+          
+        if (!error) {
+          localStorage.removeItem(PENDING_STOP_KEY);
+          console.log('Successfully synced pending session stop');
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing pending operations:', error);
+    }
+  };
 
   // Load sessions from Supabase on initial render
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        // Use type assertion to inform TypeScript about the timer_sessions table
+        // Use proper typing without type assertion
         const { data, error } = await supabase
           .from('timer_sessions')
-          .select('*') as unknown as { 
-            data: CustomDatabase['timer_sessions'][] | null; 
-            error: Error | null 
-          };
+          .select('*');
         
         if (error) {
           console.error('Error fetching sessions:', error);
@@ -71,7 +132,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         } else if (data) {
           // Transform from Supabase format to our app format
-          const formattedSessions = data.map((session) => ({
+          const formattedSessions = data.map((session: TimerSessionRow) => ({
             id: session.id,
             date: session.date,
             startTime: session.start_time,
@@ -96,6 +157,11 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     fetchSessions();
+    
+    // Try to sync any pending operations from previous sessions
+    if (navigator.onLine) {
+      syncPendingOperations();
+    }
 
     // Set up subscription for real-time updates
     const subscription = supabase
@@ -111,7 +177,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       .subscribe();
 
     return () => {
-      supabase.removeChannel(subscription);
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -124,33 +190,47 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const startTimer = async () => {
     try {
+      // Check if a session is already running
+      if (isRunning || currentSession) {
+        console.warn('Timer is already running');
+        return;
+      }
+      
       const now = new Date();
       const today = now.toISOString().split('T')[0];
       const currentTime = now.toISOString();
       
+      // Generate a secure UUID for the session
+      const sessionId = crypto.randomUUID();
+      
       const newSession: TimerSession = {
-        id: crypto.randomUUID(),
+        id: sessionId,
         date: today,
         startTime: currentTime,
         endTime: null,
         duration: null
       };
       
-      // Save to Supabase with type assertion
-      const { error } = await supabase
-        .from('timer_sessions')
-        .insert({
-          id: newSession.id,
-          date: newSession.date,
-          start_time: newSession.startTime,
-          end_time: null,
-          duration: null
-        }) as unknown as {
-          error: Error | null;
-        };
+      // Try to save to Supabase if online
+      if (isOnline) {
+        const { error } = await supabase
+          .from('timer_sessions')
+          .insert({
+            id: newSession.id,
+            date: newSession.date,
+            start_time: newSession.startTime,
+            end_time: null,
+            duration: null
+          });
 
-      if (error) {
-        console.error('Error starting timer in Supabase:', error);
+        if (error) {
+          console.error('Error starting timer in Supabase:', error);
+          // Continue with local state updates, but save to localStorage as backup
+          localStorage.setItem(PENDING_START_KEY, JSON.stringify(newSession));
+        }
+      } else {
+        // We're offline, save to pending operations
+        localStorage.setItem(PENDING_START_KEY, JSON.stringify(newSession));
       }
       
       setCurrentSession(newSession);
@@ -162,13 +242,29 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const stopTimer = async () => {
-    if (!currentSession) return;
+    if (!currentSession) {
+      console.warn('No active session to stop');
+      return;
+    }
 
     try {
       const now = new Date();
       const currentTime = now.toISOString();
       const startTime = new Date(currentSession.startTime);
+      
+      // Validate the start time is valid and in the past
+      if (isNaN(startTime.getTime()) || startTime > now) {
+        console.error('Invalid start time for session');
+        return;
+      }
+      
       const durationInSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+      
+      // Validate duration (should be positive and reasonable)
+      if (durationInSeconds <= 0) {
+        console.error('Invalid session duration');
+        return;
+      }
       
       const updatedSession = {
         ...currentSession,
@@ -176,21 +272,27 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         duration: durationInSeconds
       };
       
-      // Update in Supabase with type assertion
-      const { error } = await supabase
-        .from('timer_sessions')
-        .update({
-          end_time: updatedSession.endTime,
-          duration: updatedSession.duration
-        })
-        .eq('id', updatedSession.id) as unknown as {
-          error: Error | null;
-        };
+      // Try to update Supabase if online
+      if (isOnline) {
+        const { error } = await supabase
+          .from('timer_sessions')
+          .update({
+            end_time: updatedSession.endTime,
+            duration: updatedSession.duration
+          })
+          .eq('id', updatedSession.id);
 
-      if (error) {
-        console.error('Error stopping timer in Supabase:', error);
+        if (error) {
+          console.error('Error stopping timer in Supabase:', error);
+          // Save to localStorage as backup for later sync
+          localStorage.setItem(PENDING_STOP_KEY, JSON.stringify(updatedSession));
+        }
+      } else {
+        // We're offline, save to pending operations
+        localStorage.setItem(PENDING_STOP_KEY, JSON.stringify(updatedSession));
       }
       
+      // Update the local state
       setAllSessions(prev => 
         prev.map(session => 
           session.id === currentSession.id ? updatedSession : session
@@ -217,7 +319,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       allSessions,
       startTimer,
       stopTimer,
-      getDailyTotal
+      getDailyTotal,
+      syncPendingOperations
     }}>
       {children}
     </TimerContext.Provider>

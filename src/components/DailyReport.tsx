@@ -1,13 +1,14 @@
-
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTimer } from '@/context/TimerContext';
 import { formatDuration, formatDate, getLastNDays } from '@/utils/timeUtils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Clock } from 'lucide-react';
+import { Clock, RefreshCw } from 'lucide-react';
+import { Button } from './ui/button';
 
 const DailyReport = () => {
-  const { getDailyTotal } = useTimer();
+  const { getDailyTotal, allSessions, syncPendingOperations } = useTimer();
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const last7Days = getLastNDays(7);
   
   // Find the max duration for scaling the progress bars
@@ -26,13 +27,42 @@ const DailyReport = () => {
     return '';                                        // 0: default
   };
 
+  // Force refresh data and sync with server
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await syncPendingOperations();
+      // Allow UI to show the refresh animation for at least 800ms
+      setTimeout(() => {
+        setIsRefreshing(false);
+      }, 800);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      setIsRefreshing(false);
+    }
+  };
+
+  // Refresh data whenever allSessions changes
+  useEffect(() => {
+    // This effect just exists to re-render the component when allSessions changes
+  }, [allSessions]);
+
   return (
     <Card className="w-full">
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-2 flex flex-row justify-between items-center">
         <CardTitle className="text-lg font-medium flex items-center gap-2">
           <Clock className="h-5 w-5" />
           Daily Report
         </CardTitle>
+        <Button 
+          variant="ghost" 
+          size="icon"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className={isRefreshing ? 'animate-spin' : ''}
+        >
+          <RefreshCw className="h-4 w-4" />
+        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         {last7Days.map((date, index) => {

@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
-import { Play, Square } from 'lucide-react';
+import { Play, Square, WifiOff } from 'lucide-react';
 import { useTimer } from '@/context/TimerContext';
 import { formatTime } from '@/utils/timeUtils';
 import { Button } from '@/components/ui/button';
@@ -11,9 +10,39 @@ interface TimerProps {
 }
 
 const Timer = ({ onSessionEnd }: TimerProps) => {
-  const { isRunning, startTimer, stopTimer, currentSession } = useTimer();
+  const { isRunning, startTimer, stopTimer, currentSession, syncPendingOperations } = useTimer();
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const { toast } = useToast();
+
+  // Track online status
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      toast({
+        title: 'You are back online',
+        description: 'Syncing your data with the server...',
+      });
+      syncPendingOperations();
+    };
+    
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast({
+        title: 'You are offline',
+        description: 'Your timer will work in offline mode until connection is restored',
+        variant: 'destructive',
+      });
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [toast, syncPendingOperations]);
 
   // Update elapsed time function
   const updateElapsedTime = useCallback(() => {
@@ -56,8 +85,24 @@ const Timer = ({ onSessionEnd }: TimerProps) => {
         title: 'Session completed',
         description: `${formatTime(duration)} added to today's progress`,
       });
+      
+      if (!isOnline) {
+        toast({
+          title: 'Offline mode',
+          description: 'Your session will be synced when you reconnect',
+          variant: 'default',
+        });
+      }
     } else {
       await startTimer();
+      
+      if (!isOnline) {
+        toast({
+          title: 'Offline mode',
+          description: 'Your session will be synced when you reconnect',
+          variant: 'default',
+        });
+      }
     }
   };
 
@@ -80,6 +125,13 @@ const Timer = ({ onSessionEnd }: TimerProps) => {
 
   return (
     <div className="flex flex-col items-center justify-center gap-8">
+      {!isOnline && (
+        <div className="flex items-center gap-2 bg-amber-100 text-amber-800 px-4 py-2 rounded-lg mb-4">
+          <WifiOff className="h-4 w-4" />
+          <span className="text-sm font-medium">Offline Mode</span>
+        </div>
+      )}
+      
       <div className="text-5xl font-medium tracking-tight text-primary">
         {formatTime(elapsedTime)}
       </div>
